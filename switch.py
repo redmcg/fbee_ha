@@ -8,6 +8,12 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from .fbee import FBee
 
+def callback(add_entities, d, n):
+    if n:
+        d.ha = FBeeSwitch(d)
+        add_entities([d.ha])
+    else:
+        d.ha.schedule_update_ha_state()
 
 def setup_platform(
     hass: HomeAssistant,
@@ -19,14 +25,14 @@ def setup_platform(
         config["host"],
         config["port"],
         config["serialnumber"],
-        lambda d: add_entities([FBeeSwitch(d)]),
-    )
+        lambda d, n: callback(add_entities, d, n))
     d.connect()
-    d.refresh_devices()
+    if "poll_interval" in config:
+        i = config["poll_interval"]
+    else:
+        i = 15
+    d.start_async_read(i)
     """Set up the switch platform."""
-
-
-#    add_entities([FBeeSwitch()])
 
 
 class FBeeSwitch(SwitchEntity):
@@ -43,8 +49,13 @@ class FBeeSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return the state of the sensor."""
+        """Return the state of the switch."""
         return self.d.get_state()
+
+    @property
+    def should_poll(self) -> bool:
+        """Return if we should poll."""
+        return False
 
     def turn_on(self, **kwargs) -> None:
         self.d.push_state(1)

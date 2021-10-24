@@ -21,6 +21,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("host"): str,
         vol.Required("port"): int,
         vol.Required("serial number"): str,
+        vol.Optional("poll interval"): int,
     }
 )
 
