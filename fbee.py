@@ -1,14 +1,19 @@
+from datetime import datetime
 import socket
 import threading
-from datetime import datetime
 
-GET_ALL_DEVICES="81"
-SET_SWITCH_STATE="82"
-GET_SWITCH_STATE="85"
+GET_ALL_DEVICES = "81"
+SET_SWITCH_STATE = "82"
+GET_SWITCH_STATE = "85"
 
-ALL_DEVICES_RESP=0x01
-SWITCH_STATUS=0x07
-ACK=0x29
+ALL_DEVICES_RESP = 0x01
+SWITCH_STATUS = 0x07
+ACK = 0x29
+
+STATE_NO_CHANGE = 0
+STATE_NEW_DEV = 1
+STATE_NEW_STATE = 2
+
 
 def fmt(v, l):
     v = hex(v)
@@ -17,8 +22,9 @@ def fmt(v, l):
     v = v.zfill(l)
     return v[:l]
 
-class FBee():
-    def __init__(self, host, port, sn, device_callback = None):
+
+class FBee:
+    def __init__(self, host, port, sn, device_callbacks=[]):
         self.connected = False
         self.host = host
         self.port = port
@@ -26,8 +32,11 @@ class FBee():
         self.devices = {}
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         self.s.settimeout(1)
-        self.device_callback = device_callback
+        self.device_callbacks = device_callbacks
         self.async_thread = None
+
+    def add_callback(self, callback):
+        self.device_callbacks += callback
 
     def connect(self):
         if not self.connected:
@@ -37,7 +46,7 @@ class FBee():
     def send_data(self, data):
         data = bytes.fromhex(data)
         b = self.sn + b"\xFE" + data
-        l = (len(b) + 2).to_bytes(2, byteorder='little')
+        l = (len(b) + 2).to_bytes(2, byteorder="little")
         self.s.send(l + b)
 
     def recv(self):
@@ -46,40 +55,57 @@ class FBee():
             resp = b[0]
             b = self.s.recv(b[1])
             if resp == ALL_DEVICES_RESP:
-                short=int.from_bytes(b[0:2], byteorder='little')
-                ep=b[2]
+                short = int.from_bytes(b[0:2], byteorder="little")
+                ep = b[2]
                 state = b[7]
-                name=b[9:9+b[8]].decode()
+                name = b[9 : 9 + b[8]].decode()
                 if name == "":
-                    name = "[" + b[19:19+b[18]].decode() + "]"
+                    name = "[" + b[19 : 19 + b[18]].decode() + "]"
 
                 key = hex(short) + hex(ep)
                 if key in self.devices:
                     device = self.devices[key]
+                    oldstate = device.get_state()
+                    oldname = device.get_name()
                     device.set_state(state)
                     device.set_name(name)
-                    newdev = False
+                    if oldstate == state and oldname == name:
+                        state = STATE_NO_CHANGE
+                    else:
+                        state = STATE_NEW_STATE
                 else:
-                    device = self.devices[hex(short) + hex(ep)] = FBeeSwitch(self, name, short, ep, state)
-                    newdev = True
+                    device = self.devices[hex(short) + hex(ep)] = FBeeSwitch(
+                        self, name, short, ep, state
+                    )
+                    state = STATE_NEW_DEV
 
-                if self.device_callback != None:
-                    self.device_callback(device, newdev)
+                for callback in self.device_callbacks:
+                    callback(device, state)
             elif resp == SWITCH_STATUS:
-                short=int.from_bytes(b[0:2], byteorder='little')
-                ep=b[2]
+                short = int.from_bytes(b[0:2], byteorder="little")
+                ep = b[2]
                 state = b[3]
                 key = hex(short) + hex(ep)
                 if key in self.devices:
                     device = self.devices[key]
+                    oldstate = device.get_state()
                     self.devices[key].set_state(state)
-                    newdev = False
+                    if oldstate == state:
+                        state = STATE_NO_CHANGE
+                    else:
+                        state = STATE_NEW_STATE
                 else:
-                    device = self.devices[key] = FBeeSwitch(self, "[Unknown] " + hex(short) + " " + hex(ep), short, ep, state)
-                    newdev = True
+                    device = self.devices[key] = FBeeSwitch(
+                        self,
+                        "[Unknown] " + hex(short) + " " + hex(ep),
+                        short,
+                        ep,
+                        state,
+                    )
+                    state = STATE_NEW_DEV
 
-                if self.device_callback != None:
-                    self.device_callback(device, newdev)
+                for callback in self.device_callbacks:
+                    callback(device, state)
 
     def async_read(self, poll_interval):
         poll_interval = int(poll_interval)
@@ -87,7 +113,7 @@ class FBee():
         next_refresh = 0
         while True:
             now = datetime.now()
-            now = (now-datetime(1970,1,1)).total_seconds()
+            now = (now - datetime(1970, 1, 1)).total_seconds()
             if next_refresh <= now:
                 self.refresh_devices()
                 next_refresh = now + poll_interval
@@ -117,7 +143,15 @@ class FBee():
     def poll_state(self, short, ep):
         short = fmt(short, 4)
         ep = fmt(ep, 2)
-        self.send_data(GET_SWITCH_STATE + "0002" + short[2:4] + short[0:2] + ("0" * 12) + ep + "0000")
+        self.send_data(
+            GET_SWITCH_STATE
+            + "0002"
+            + short[2:4]
+            + short[0:2]
+            + ("0" * 12)
+            + ep
+            + "0000"
+        )
         self.safe_recv()
 
     def get_device(self, short, ep):
@@ -132,14 +166,17 @@ class FBee():
         return self.devices[key]
 
     def start_async_read(self, poll_interval):
-        self.async_thread = threading.Thread(target=self.async_read, args=(poll_interval,))
+        self.async_thread = threading.Thread(
+            target=self.async_read, args=(poll_interval,)
+        )
         self.async_thread.start()
         return self.async_thread
 
     def close(self):
         self.s.close()
 
-class FBeeSwitch():
+
+class FBeeSwitch:
     def __init__(self, fbee, name, short, ep, state):
         self.fbee = fbee
         self.name = name
@@ -156,6 +193,12 @@ class FBeeSwitch():
     def get_state(self):
         return self.state
 
+    def get_name(self):
+        return self.name
+
+    def get_key(self):
+        return hex(self.short) + hex(self.ep)
+
     def poll_state(self):
         self.fbee.poll_state(self.short, self.ep)
 
@@ -164,5 +207,14 @@ class FBeeSwitch():
         ep = fmt(self.ep, 2)
         if type(state) != int:
             state = int(state, 16)
-        self.fbee.send_data(SET_SWITCH_STATE + "0D02" + short[2:4] + short[0:2] + ("0" * 12) + ep + "0000" + fmt(state, 2))
+        self.fbee.send_data(
+            SET_SWITCH_STATE
+            + "0D02"
+            + short[2:4]
+            + short[0:2]
+            + ("0" * 12)
+            + ep
+            + "0000"
+            + fmt(state, 2)
+        )
         self.fbee.safe_recv()

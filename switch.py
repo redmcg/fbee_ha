@@ -6,14 +6,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .fbee import FBee
+from .const import DOMAIN
+from .fbee import STATE_NEW_DEV, STATE_NEW_STATE, FBee
 
-def callback(add_entities, d, n):
-    if n:
+
+def callback(add_entities, d, s):
+    if s & STATE_NEW_DEV:
         d.ha = FBeeSwitch(d)
         add_entities([d.ha])
-    else:
+    elif s & STATE_NEW_STATE:
         d.ha.schedule_update_ha_state()
+
 
 def setup_platform(
     hass: HomeAssistant,
@@ -25,14 +28,24 @@ def setup_platform(
         config["host"],
         config["port"],
         config["serialnumber"],
-        lambda d, n: callback(add_entities, d, n))
+        lambda d, s: callback(add_entities, d, s),
+    )
     d.connect()
-    if "poll_interval" in config:
-        i = config["poll_interval"]
+    if "pollinterval" in config:
+        i = config["pollinterval"]
     else:
-        i = 15
+        i = 60
     d.start_async_read(i)
     """Set up the switch platform."""
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    d = hass.data[DOMAIN][entry.entry_id]
+    d.add_callback([lambda d, s: callback(async_add_entities, d, s)])
 
 
 class FBeeSwitch(SwitchEntity):
@@ -45,7 +58,7 @@ class FBeeSwitch(SwitchEntity):
     @property
     def name(self) -> str:
         """Return the name of the switch."""
-        return self.d.name
+        return self.d.get_name()
 
     @property
     def is_on(self) -> bool:
@@ -56,6 +69,10 @@ class FBeeSwitch(SwitchEntity):
     def should_poll(self) -> bool:
         """Return if we should poll."""
         return False
+
+    @property
+    def unique_id(self) -> str:
+        return self.d.get_key()
 
     def turn_on(self, **kwargs) -> None:
         self.d.push_state(1)
