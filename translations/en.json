@@ -12,8 +12,9 @@
             "user": {
                 "data": {
                     "host": "Host",
-                    "password": "Password",
-                    "username": "Username"
+                    "port": "Port",
+                    "serialnumber": "Serial Number",
+                    "pollinterval": "Poll Interval"
                 }
             }
         }
