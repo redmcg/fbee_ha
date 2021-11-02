@@ -11,7 +11,7 @@ from .fbee import STATE_NEW_DEV, STATE_NEW_STATE, FBee, NotConnected
 
 
 def callback(add_entities, d, s):
-    if s & STATE_NEW_DEV:
+    if not hasattr(d, 'ha'):
         d.ha = FBeeSwitch(d)
         add_entities([d.ha])
     elif s & STATE_NEW_STATE:
