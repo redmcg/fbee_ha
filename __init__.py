@@ -11,8 +11,14 @@ from .fbee import FBee
 # List of the platforms to support.
 PLATFORMS: list[str] = ["switch"]
 
+def handle_disconnect(d):
+    global reconnect
+    if reconnect:
+        d.connect()
+        d.start_async_read(disconnect_callback = handle_disconnect)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    global reconnect
     hass.data.setdefault(DOMAIN, {})
 
     """Set up fbee from a config entry."""
@@ -31,16 +37,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         i = entry.data["pollinterval"]
     else:
         i = 60
-    d.start_async_read(i)
+    reconnect = True
+    d.start_async_read(i, handle_disconnect)
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    global reconnect
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         d = hass.data[DOMAIN].pop(entry.entry_id)
+        reconnect = False
         d.close()
 
     return unload_ok

@@ -7,7 +7,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from .const import DOMAIN
-from .fbee import STATE_NEW_DEV, STATE_NEW_STATE, FBee
+from .fbee import STATE_NEW_DEV, STATE_NEW_STATE, FBee, NotConnected
 
 
 def callback(add_entities, d, s):
@@ -28,7 +28,7 @@ def setup_platform(
         config["host"],
         config["port"],
         config["serialnumber"],
-        lambda d, s: callback(add_entities, d, s),
+        [lambda d, s: callback(add_entities, d, s)],
     )
     d.connect()
     if "pollinterval" in config:
@@ -75,7 +75,13 @@ class FBeeSwitch(SwitchEntity):
         return self.d.get_key()
 
     def turn_on(self, **kwargs) -> None:
-        self.d.push_state(1)
+        try:
+            self.d.push_state(1)
+        except NotConnected:
+            pass
 
     def turn_off(self, **kwargs) -> None:
-        self.d.push_state(0)
+        try:
+            self.d.push_state(0)
+        except NotConnected:
+            pass
