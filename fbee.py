@@ -51,7 +51,7 @@ class FBee():
             try:
                 self.s.send(l + b)
             except OSError:
-                s.m.release()
+                self.m.release()
                 raise NotConnected
         else:
            self.m.release()
